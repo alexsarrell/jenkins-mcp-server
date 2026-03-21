@@ -1,0 +1,32 @@
+{
+  "name": "jenkins-mcp-server",
+  "version": "1.0.0",
+  "description": "Jenkins MCP server for Claude Code integration",
+  "main": "dist/index.js",
+  "bin": {
+    "jenkins-mcp-server": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/index.js"
+  },
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "keywords": [
+    "jenkins",
+    "mcp",
+    "claude"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.27.1",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "typescript": "^5.9.3"
+  }
+}
