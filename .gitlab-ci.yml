@@ -69,6 +69,7 @@ release:
 
       # Bump version, create tag, push
       NEW_VERSION=$(npm version $BUMP --no-git-tag-version)
+      git tag -d "${NEW_VERSION}" 2>/dev/null || true
       git add package.json package-lock.json
       git commit -m "release: ${NEW_VERSION}"
       git tag "${NEW_VERSION}"
