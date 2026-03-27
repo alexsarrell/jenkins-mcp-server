@@ -32,7 +32,8 @@ export function formatJobStatus(color: string): string {
     yellow_anime: "RUNNING (was UNSTABLE)",
     grey_anime: "RUNNING",
   };
-  return statusMap[color] || color;
+  if (!color) return "UNKNOWN";
+  return statusMap[color] || color.toUpperCase();
 }
 
 export function formatTimestamp(ts: number): string {

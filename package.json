@@ -1,5 +1,5 @@
 {
-  "name": "jenkins-mcp-server",
+  "name": "@alexsarrell/jenkins-mcp-server",
   "version": "1.0.0",
   "description": "Jenkins MCP server for Claude Code integration",
   "main": "dist/index.js",
