@@ -6,6 +6,7 @@ import { formatJobList, formatJobDetail, ok, error, truncateText } from "../util
 export function registerJobTools(
   client: JenkinsClient,
   register: (name: string, description: string, schema: z.ZodType, handler: (args: Record<string, unknown>) => Promise<ToolResult>) => void,
+  allowUnsafe: boolean,
 ) {
   // 1. getJobs
   register(
@@ -74,25 +75,27 @@ export function registerJobTools(
     },
   );
 
-  // 4. updateJobConfig
-  register(
-    "updateJobConfig",
-    "Update a Jenkins job's XML configuration. Send the complete config.xml content. Use getJobConfig first to read the current config, modify it, then submit.",
-    z.object({
-      jobPath: z.string().describe("Full job path (e.g., 'my-folder/my-job')"),
-      configXml: z.string().describe("Complete XML configuration for the job"),
-    }),
-    async (args) => {
-      const jobPath = args.jobPath as string;
-      const configXml = args.configXml as string;
-      try {
-        await client.post(jobPath, "/config.xml", configXml, "application/xml");
-        return ok(`Job config updated successfully: ${jobPath}`);
-      } catch (e) {
-        return handleError(e);
-      }
-    },
-  );
+  // 4. updateJobConfig (unsafe — requires JENKINS_ALLOW_UNSAFE_OPERATIONS=true)
+  if (allowUnsafe) {
+    register(
+      "updateJobConfig",
+      "Update a Jenkins job's XML configuration. Send the complete config.xml content. Use getJobConfig first to read the current config, modify it, then submit.",
+      z.object({
+        jobPath: z.string().describe("Full job path (e.g., 'my-folder/my-job')"),
+        configXml: z.string().describe("Complete XML configuration for the job"),
+      }),
+      async (args) => {
+        const jobPath = args.jobPath as string;
+        const configXml = args.configXml as string;
+        try {
+          await client.post(jobPath, "/config.xml", configXml, "application/xml");
+          return ok(`Job config updated successfully: ${jobPath}`);
+        } catch (e) {
+          return handleError(e);
+        }
+      },
+    );
+  }
 }
 
 function handleError(e: unknown): ToolResult {

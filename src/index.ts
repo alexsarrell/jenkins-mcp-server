@@ -25,6 +25,8 @@ if (!JENKINS_URL || !JENKINS_USER || !JENKINS_API_TOKEN) {
   process.exit(1);
 }
 
+const ALLOW_UNSAFE = process.env.JENKINS_ALLOW_UNSAFE_OPERATIONS === "true";
+
 // Create Jenkins client
 const client = new JenkinsClient({
   url: JENKINS_URL,
@@ -62,9 +64,9 @@ function register(
 }
 
 // Register all tools
-registerJobTools(client, register);
+registerJobTools(client, register, ALLOW_UNSAFE);
 registerBuildTools(client, register);
-registerPipelineTools(client, register);
+registerPipelineTools(client, register, ALLOW_UNSAFE);
 registerDiscoveryTools(client, register);
 
 // Start server
@@ -74,6 +76,7 @@ async function main() {
   console.error("Jenkins MCP server started successfully.");
   console.error(`Connected to: ${JENKINS_URL}`);
   console.error(`User: ${JENKINS_USER}`);
+  console.error(`Unsafe operations: ${ALLOW_UNSAFE ? "enabled" : "disabled"}`);
 }
 
 main().catch((e) => {

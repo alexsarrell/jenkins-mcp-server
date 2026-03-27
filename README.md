@@ -1,4 +1,4 @@
-# @alexsarrell/jenkins-mcp-server
+# @alexsarrell/jenkins-mcp-server v1.0.1
 
 A custom MCP (Model Context Protocol) server for Jenkins integration with Claude Code. Provides 18 tools for comprehensive Jenkins management including pipeline replay, stage-level logs, job configuration editing, and multibranch pipeline support.
 
@@ -43,8 +43,27 @@ Restart Claude Code and the `jenkins` MCP server will be available.
 | `JENKINS_URL` | Yes | Jenkins server URL |
 | `JENKINS_USER` | Yes | Jenkins username |
 | `JENKINS_API_TOKEN` | Yes | Jenkins API token |
+| `JENKINS_ALLOW_UNSAFE_OPERATIONS` | No | Set to `true` to enable unsafe tools (`replayBuild`, `updateJobConfig`) |
 
-## Tools (18)
+### Unsafe Operations
+
+By default, tools that can execute arbitrary code or modify job configurations are **disabled**. This includes:
+
+- **replayBuild** — replays a build with arbitrary Groovy/Pipeline script
+- **updateJobConfig** — overwrites job XML configuration
+
+To enable them, add the env variable to your MCP config:
+
+```json
+"env": {
+  "JENKINS_URL": "...",
+  "JENKINS_USER": "...",
+  "JENKINS_API_TOKEN": "...",
+  "JENKINS_ALLOW_UNSAFE_OPERATIONS": "true"
+}
+```
+
+## Tools (16 default + 2 unsafe)
 
 ### Job Management
 - **getJobs** - List jobs in a folder with status summary

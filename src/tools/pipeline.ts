@@ -6,6 +6,7 @@ import { formatStages, formatDuration, ok, error, truncateText } from "../utils/
 export function registerPipelineTools(
   client: JenkinsClient,
   register: (name: string, description: string, schema: z.ZodType, handler: (args: Record<string, unknown>) => Promise<ToolResult>) => void,
+  allowUnsafe: boolean,
 ) {
   // 11. getPipelineStages
   register(
@@ -171,62 +172,64 @@ export function registerPipelineTools(
     },
   );
 
-  // 14. replayBuild
-  register(
-    "replayBuild",
-    "Replay a pipeline build with optional script modifications. If no script is provided, replays with the same script. Use getPipelineScript first to get the current script, modify it, then replay.",
-    z.object({
-      jobPath: z.string().describe("Full job path"),
-      buildNumber: z.number().describe("Build number to replay"),
-      mainScript: z.string().optional().describe("Modified Jenkinsfile content. If omitted, replays with the original script."),
-    }),
-    async (args) => {
-      const jobPath = args.jobPath as string;
-      const buildNumber = args.buildNumber as number;
-      let mainScript = args.mainScript as string | undefined;
+  // 14. replayBuild (unsafe — requires JENKINS_ALLOW_UNSAFE_OPERATIONS=true)
+  if (allowUnsafe) {
+    register(
+      "replayBuild",
+      "Replay a pipeline build with optional script modifications. If no script is provided, replays with the same script. Use getPipelineScript first to get the current script, modify it, then replay.",
+      z.object({
+        jobPath: z.string().describe("Full job path"),
+        buildNumber: z.number().describe("Build number to replay"),
+        mainScript: z.string().optional().describe("Modified Jenkinsfile content. If omitted, replays with the original script."),
+      }),
+      async (args) => {
+        const jobPath = args.jobPath as string;
+        const buildNumber = args.buildNumber as number;
+        let mainScript = args.mainScript as string | undefined;
 
-      try {
-        // If no script provided, fetch current one
-        if (!mainScript) {
-          const html = await client.getRaw(jobPath, `/${buildNumber}/replay`);
-          const match = html.match(
-            /name="_.mainScript"[^>]*>([\s\S]*?)<\/textarea>/,
-          );
-          if (match) {
-            mainScript = decodeHtmlEntities(match[1]);
-          } else {
-            return error(
-              "Could not extract current pipeline script for replay.",
-              "Try providing the script explicitly via the mainScript parameter.",
+        try {
+          // If no script provided, fetch current one
+          if (!mainScript) {
+            const html = await client.getRaw(jobPath, `/${buildNumber}/replay`);
+            const match = html.match(
+              /name="_.mainScript"[^>]*>([\s\S]*?)<\/textarea>/,
             );
+            if (match) {
+              mainScript = decodeHtmlEntities(match[1]);
+            } else {
+              return error(
+                "Could not extract current pipeline script for replay.",
+                "Try providing the script explicitly via the mainScript parameter.",
+              );
+            }
           }
+
+          // Submit replay
+          const formData = new URLSearchParams();
+          formData.set("mainScript", mainScript);
+          formData.set(
+            "json",
+            JSON.stringify({ mainScript }),
+          );
+
+          const result = await client.postForm(
+            jobPath,
+            `/${buildNumber}/replay/run`,
+            formData,
+          );
+
+          // The response redirects to the new build page
+          const location = result.response.headers.get("location");
+          if (location) {
+            return ok(`Replay triggered successfully.\nNew build: ${location}`);
+          }
+          return ok(`Replay triggered for ${jobPath} build #${buildNumber}.`);
+        } catch (e) {
+          return handleError(e, "Replay requires Pipeline job type and appropriate permissions.");
         }
-
-        // Submit replay
-        const formData = new URLSearchParams();
-        formData.set("mainScript", mainScript);
-        formData.set(
-          "json",
-          JSON.stringify({ mainScript }),
-        );
-
-        const result = await client.postForm(
-          jobPath,
-          `/${buildNumber}/replay/run`,
-          formData,
-        );
-
-        // The response redirects to the new build page
-        const location = result.response.headers.get("location");
-        if (location) {
-          return ok(`Replay triggered successfully.\nNew build: ${location}`);
-        }
-        return ok(`Replay triggered for ${jobPath} build #${buildNumber}.`);
-      } catch (e) {
-        return handleError(e, "Replay requires Pipeline job type and appropriate permissions.");
-      }
-    },
-  );
+      },
+    );
+  }
 
   // 15. restartFromStage
   register(
