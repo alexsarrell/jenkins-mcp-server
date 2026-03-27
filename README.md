@@ -2,10 +2,6 @@
 
 A custom MCP (Model Context Protocol) server for Jenkins integration with Claude Code. Provides 18 tools for comprehensive Jenkins management including pipeline replay, stage-level logs, job configuration editing, and multibranch pipeline support.
 
-## Why?
-
-The official Jenkins MCP plugin has timeout issues (30s timeouts). This standalone server connects directly to Jenkins REST API via stdio transport and works reliably.
-
 ## Quick Start
 
 Add to your `~/.claude.json`:
