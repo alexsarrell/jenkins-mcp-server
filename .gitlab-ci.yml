@@ -36,8 +36,16 @@ release:
     - git config user.name "gitlab-ci"
     - git config user.email "ci@gitlab.just-ai.com"
     - git remote set-url origin "https://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.just-ai.com/${CI_PROJECT_PATH}.git"
+    - git fetch origin --tags --unshallow || git fetch origin --tags
   script:
     - |
+      # Skip if last commit is a release commit (avoid infinite loop)
+      LAST_MSG=$(git log -1 --pretty=format:"%s")
+      if echo "$LAST_MSG" | grep -q "^release: v"; then
+        echo "Last commit is a release — skipping"
+        exit 0
+      fi
+
       # Determine bump type from commits since last tag
       LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
       if [ -z "$LAST_TAG" ]; then
@@ -57,6 +65,7 @@ release:
       fi
 
       echo "Bump type: $BUMP"
+      echo "Last tag: ${LAST_TAG:-none}"
 
       # Bump version, create tag, push
       NEW_VERSION=$(npm version $BUMP --no-git-tag-version)
