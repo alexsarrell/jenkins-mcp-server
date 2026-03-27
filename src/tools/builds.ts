@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { JenkinsClient } from "../jenkins-client.js";
 import type { JenkinsBuild, BuildArtifact, TestResult, ToolResult } from "../types.js";
-import { formatBuild, formatDuration, formatTimestamp, ok, error, truncateText } from "../utils/formatters.js";
+import { formatBuild, ok, error, truncateText } from "../utils/formatters.js";
 
 export function registerBuildTools(
   client: JenkinsClient,

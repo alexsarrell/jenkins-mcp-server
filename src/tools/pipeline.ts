@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { JenkinsClient } from "../jenkins-client.js";
-import type { PipelineRun, PipelineStage, ToolResult } from "../types.js";
+import type { PipelineRun, ToolResult } from "../types.js";
 import { formatStages, formatDuration, ok, error, truncateText } from "../utils/formatters.js";
 
 export function registerPipelineTools(
