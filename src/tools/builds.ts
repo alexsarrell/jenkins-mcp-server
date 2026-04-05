@@ -23,12 +23,22 @@ export function registerBuildTools(
         let result: { response: Response; data: unknown };
         if (parameters && Object.keys(parameters).length > 0) {
           const formData = new URLSearchParams();
-          const json = JSON.stringify({ parameter: Object.entries(parameters).map(([name, value]) => ({ name, value })) });
-          formData.set("json", json);
-          // Also set individual params for compatibility
-          for (const [key, value] of Object.entries(parameters)) {
-            formData.set(key, value);
+          // Build JSON body — multi-value params (comma-separated) become arrays
+          const jsonParams: { name: string; value: string | string[] }[] = [];
+          for (const [name, value] of Object.entries(parameters)) {
+            if (value.includes(",")) {
+              const values = value.split(",").map(v => v.trim());
+              jsonParams.push({ name, value: values as unknown as string });
+              // ExtendedChoiceParameter (PT_CHECKBOX) requires repeated query params
+              for (const v of values) {
+                formData.append(name, v);
+              }
+            } else {
+              jsonParams.push({ name, value });
+              formData.append(name, value);
+            }
           }
+          const json = JSON.stringify({ parameter: jsonParams });
           result = await client.postForm(jobPath, "/buildWithParameters", formData);
         } else {
           result = await client.post(jobPath, "/build");
