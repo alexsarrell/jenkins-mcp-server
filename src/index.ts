@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
@@ -9,6 +12,10 @@ import { registerJobTools } from "./tools/jobs.js";
 import { registerBuildTools } from "./tools/builds.js";
 import { registerPipelineTools } from "./tools/pipeline.js";
 import { registerDiscoveryTools } from "./tools/discovery.js";
+
+const pkg = JSON.parse(
+  readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "package.json"), "utf8"),
+) as { version: string };
 
 // Validate environment variables
 const JENKINS_URL = process.env.JENKINS_URL;
@@ -37,7 +44,7 @@ const client = new JenkinsClient({
 // Create MCP server
 const server = new McpServer({
   name: "jenkins-mcp-server",
-  version: "1.0.0",
+  version: pkg.version,
 });
 
 // Tool registration helper that wraps the McpServer.tool() API
