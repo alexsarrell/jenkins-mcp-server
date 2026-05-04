@@ -2,6 +2,8 @@ import { z } from "zod";
 import type { JenkinsClient } from "../jenkins-client.js";
 import type { JenkinsJob, ToolResult } from "../types.js";
 import { formatJobList, formatJobDetail, ok, error, truncateText } from "../utils/formatters.js";
+import { mapJenkinsParameter, type JenkinsParameterDefinition } from "../utils/parameter-mapper.js";
+import type { ParameterSpec } from "../schemas/parameter.js";
 
 export function registerJobTools(
   client: JenkinsClient,
@@ -69,6 +71,30 @@ export function registerJobTools(
       try {
         const xml = await client.getRaw(jobPath, "/config.xml");
         return ok(truncateText(xml));
+      } catch (e) {
+        return handleError(e);
+      }
+    },
+  );
+
+  // 3b. getJobParameters
+  register(
+    "getJobParameters",
+    "Get the structured parameter schema for a Jenkins job. Returns each parameter's type (string/choice/boolean/password/file/run/credentials/unknown), default, choices, and description as JSON. Use this instead of getJob when you need to know what to pass to triggerBuild.",
+    z.object({
+      jobPath: z.string().describe("Full job path"),
+    }),
+    async (args) => {
+      const jobPath = args.jobPath as string;
+      try {
+        const tree = "property[parameterDefinitions[name,type,description,defaultParameterValue[value],choices,projectName,credentialType,_class]]";
+        const data = await client.get(jobPath, "/api/json", { tree });
+        const job = data as {
+          property?: Array<{ parameterDefinitions?: JenkinsParameterDefinition[] }>;
+        };
+        const defs = (job.property ?? []).flatMap((p) => p.parameterDefinitions ?? []);
+        const parameters: ParameterSpec[] = defs.map(mapJenkinsParameter);
+        return ok(JSON.stringify({ parameters }, null, 2));
       } catch (e) {
         return handleError(e);
       }
