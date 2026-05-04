@@ -1,4 +1,4 @@
-# @alexsarrell/jenkins-mcp-server v1.2.0
+# @alexsarrell/jenkins-mcp-server v1.3.0
 
 A custom MCP (Model Context Protocol) server for Jenkins integration with Claude Code. Provides 22 tools (20 default + 2 unsafe) for comprehensive Jenkins management including pipeline replay, stage-level logs, structured config reads, parameter introspection, and rich log search.
 
@@ -112,7 +112,7 @@ my-pipeline::feature/my-branch
 triggerBuild({ jobPath: "x", parameters: { TAGS: ["alpha", "beta", "gamma"] } });
 ```
 
-A legacy `splitOnComma: true` flag preserves the pre-1.2 behaviour (split string values on commas) — deprecated, will be removed in v2.0.
+A legacy `splitOnComma: true` flag preserves the pre-1.3 behaviour (split string values on commas) — deprecated, will be removed in v2.0.
 
 ## Log search and grep
 
