@@ -176,6 +176,7 @@ async function searchOneBuild(
           if (p.collected >= after) {
             matches.push({ lineNumber: p.lineNumber, context: p.context });
             pending.splice(i, 1);
+            if (matches.length >= maxMatches) return matches;
           }
         }
         if (isMatch(line)) {
@@ -201,6 +202,23 @@ async function searchOneBuild(
     // Fallback to /consoleText (e.g., progressiveText not available).
     const text = await client.getRaw(jobPath, `/${buildNumber}/consoleText`);
     return fallbackSearch(text, isMatch, before, after, maxMatches);
+  }
+
+  // Process trailing fragment if log doesn't end with \n.
+  if (leftover.length > 0) {
+    lineNumber++;
+    for (const p of pending) {
+      p.context.push({ lineNumber, text: leftover });
+    }
+    if (isMatch(leftover)) {
+      const ctx: Array<{ lineNumber: number; text: string }> = [];
+      const startIdx = Math.max(0, tail.length - before);
+      for (let j = startIdx; j < tail.length; j++) {
+        ctx.push({ lineNumber: lineNumber - (tail.length - j), text: tail[j] });
+      }
+      ctx.push({ lineNumber, text: leftover });
+      matches.push({ lineNumber, context: ctx });
+    }
   }
 
   // Final flush: emit pending matches with whatever after-context we got.
