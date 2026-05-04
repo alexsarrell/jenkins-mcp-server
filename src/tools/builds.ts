@@ -3,6 +3,7 @@ import type { JenkinsClient } from "../jenkins-client.js";
 import type { JenkinsBuild, BuildArtifact, TestResult, ToolResult } from "../types.js";
 import { formatBuild, ok, error, truncateText } from "../utils/formatters.js";
 import { buildTriggerPayload, type ParameterValue } from "../utils/build-payload.js";
+import { grepLog } from "../utils/log-grep.js";
 
 export function registerBuildTools(
   client: JenkinsClient,
@@ -91,56 +92,80 @@ export function registerBuildTools(
   // 7. getBuildLog
   register(
     "getBuildLog",
-    "Get console output of a Jenkins build. By default returns the last 200 lines (tail). Use 'maxLines' to control output size. For large logs, use 'startByte' for byte-offset pagination. Returns hasMore flag and nextStart for follow-up calls.",
+    "Get console output of a Jenkins build. Three modes: (a) tail (default — returns last `maxLines`), (b) byte-offset pagination via `startByte`, (c) grep mode if `pattern` is set (returns matches with `before`/`after` context lines). Modes are mutually exclusive — if `pattern` is set, tail/startByte are ignored.",
     z.object({
       jobPath: z.string().describe("Full job path"),
       buildNumber: z.number().optional().describe("Build number (default: last build)"),
-      maxLines: z.number().optional().default(200).describe("Maximum lines to return (default: 200)"),
-      startByte: z.number().optional().describe("Byte offset to start from (for pagination). Use nextStart from previous response."),
+      maxLines: z.number().optional().default(200).describe("[Tail mode] Maximum lines to return"),
+      startByte: z.number().optional().describe("[Pagination mode] Byte offset to start from"),
+      pattern: z.string().optional().describe("[Grep mode] Search pattern. Switches the tool to grep mode when set."),
+      regex: z.boolean().optional().default(false).describe("[Grep mode] Treat pattern as regex (default: case-insensitive substring)"),
+      before: z.number().optional().default(0).describe("[Grep mode] Lines of context before each match"),
+      after: z.number().optional().default(0).describe("[Grep mode] Lines of context after each match"),
+      maxMatches: z.number().optional().default(50).describe("[Grep mode] Stop after this many matches"),
     }),
     async (args) => {
       const jobPath = args.jobPath as string;
       const buildNumber = args.buildNumber as number | undefined;
       const maxLines = (args.maxLines as number) || 200;
       const startByte = args.startByte as number | undefined;
+      const pattern = args.pattern as string | undefined;
+      const regex = (args.regex as boolean) ?? false;
+      const before = (args.before as number) ?? 0;
+      const after = (args.after as number) ?? 0;
+      const maxMatches = (args.maxMatches as number) ?? 50;
       const num = buildNumber ?? "lastBuild";
 
       try {
+        // Grep mode
+        if (pattern !== undefined) {
+          const text = await client.getRaw(jobPath, `/${num}/consoleText`);
+          let result;
+          try {
+            result = grepLog(text, { pattern, regex, before, after, maxMatches });
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            return error(msg);
+          }
+          const header = [
+            `--- Build Log Search: pattern="${pattern}" (regex=${regex}, before=${before}, after=${after}) ---`,
+            `Total matches: ${result.matches.length}${result.truncated ? ` (truncated at maxMatches=${maxMatches})` : ""}`,
+            "",
+          ];
+          const blocks = result.matches.map((m, idx) => {
+            const ctxLines = m.context.map((c) => `${String(c.lineNumber).padStart(6)}: ${c.text}`);
+            return `=== match #${idx + 1} (line ${m.lineNumber}) ===\n${ctxLines.join("\n")}`;
+          });
+          return ok(truncateText(header.join("\n") + blocks.join("\n\n")));
+        }
+
+        // Pagination mode
         if (startByte !== undefined) {
-          // Progressive log with byte offset
           const url = `/${num}/logText/progressiveText`;
           const data = await client.get(jobPath, url, { start: String(startByte) });
           const text = typeof data === "string" ? data : String(data);
-          // Note: progressiveText returns X-Text-Size and X-More-Data headers
-          // but we can't easily access them through our client. Return what we have.
           return ok(truncateText(text));
         }
 
-        // Full console text, then tail
+        // Tail mode (default)
         const text = await client.getRaw(jobPath, `/${num}/consoleText`);
         const lines = text.split("\n");
         const totalLines = lines.length;
-
         let output: string;
         let hasMore = false;
-
         if (lines.length > maxLines) {
-          // Tail from end
-          const start = lines.length - maxLines;
-          output = lines.slice(start).join("\n");
+          output = lines.slice(lines.length - maxLines).join("\n");
           hasMore = true;
         } else {
           output = text;
         }
-
         const meta = [
           `--- Build Log (${totalLines} total lines, showing last ${Math.min(maxLines, totalLines)}) ---`,
         ];
         if (hasMore) {
-          meta.push(`[Has more content. ${totalLines - maxLines} earlier lines not shown. Increase maxLines or use startByte for full log.]`);
+          meta.push(`[Has more content. ${totalLines - maxLines} earlier lines not shown. Increase maxLines, use startByte, or use pattern for grep mode.]`);
         }
         meta.push("");
-
         return ok(truncateText(meta.join("\n") + output));
       } catch (e) {
         return handleError(e);
