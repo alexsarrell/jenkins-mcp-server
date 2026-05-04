@@ -125,22 +125,23 @@ export function formatBuild(build: JenkinsBuild): string {
     lines.push(`Triggered by: ${causes.join(", ")}`);
   }
 
-  // Artifacts
-  if (build.artifacts && build.artifacts.length > 0) {
-    lines.push(`\nArtifacts (${build.artifacts.length}):`);
-    for (const a of build.artifacts) {
-      lines.push(`  - ${a.fileName} (${a.relativePath})`);
-    }
-  }
-
   // Parameters
   const parametersAction = build.actions?.find((a) => a.parameters && a.parameters.length > 0);
   if (parametersAction?.parameters) {
     lines.push(`\nParameters (${parametersAction.parameters.length}):`);
     for (const p of parametersAction.parameters) {
+      // Loose substring match — covers PasswordParameterValue and most plugin variants.
       const isPassword = (p._class || "").toLowerCase().includes("password");
       const display = isPassword ? "[hidden]" : String(p.value ?? "");
       lines.push(`  ${p.name} = ${display}`);
+    }
+  }
+
+  // Artifacts
+  if (build.artifacts && build.artifacts.length > 0) {
+    lines.push(`\nArtifacts (${build.artifacts.length}):`);
+    for (const a of build.artifacts) {
+      lines.push(`  - ${a.fileName} (${a.relativePath})`);
     }
   }
 

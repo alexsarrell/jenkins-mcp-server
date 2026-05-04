@@ -8,6 +8,8 @@ export function registerBuildTools(
   client: JenkinsClient,
   register: (name: string, description: string, schema: z.ZodType, handler: (args: Record<string, unknown>) => Promise<ToolResult>) => void,
 ) {
+  const DEFAULT_GET_BUILD_INCLUDE = ["causes", "parameters", "artifacts", "changes"] as const;
+
   // 5. triggerBuild
   register(
     "triggerBuild",
@@ -59,12 +61,12 @@ export function registerBuildTools(
       jobPath: z.string().describe("Full job path"),
       buildNumber: z.number().optional().describe("Build number (default: last build)"),
       include: z.array(z.enum(["artifacts", "changes", "causes", "parameters"])).optional()
-        .describe("Sections to include. Default: [\"causes\", \"parameters\", \"artifacts\", \"changes\"]"),
+        .describe(`Sections to include. Default: ${JSON.stringify(DEFAULT_GET_BUILD_INCLUDE)}`),
     }),
     async (args) => {
       const jobPath = args.jobPath as string;
       const buildNumber = args.buildNumber as number | undefined;
-      const include = (args.include as string[] | undefined) ?? ["causes", "parameters", "artifacts", "changes"];
+      const include = (args.include as string[] | undefined) ?? [...DEFAULT_GET_BUILD_INCLUDE];
       const num = buildNumber ?? "lastBuild";
 
       try {
