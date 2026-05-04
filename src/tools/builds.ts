@@ -14,7 +14,7 @@ export function registerBuildTools(
     "Trigger a new build for a Jenkins job. Supports parameterized builds. For multibranch pipelines, trigger on a specific branch. Returns the queue item URL for tracking.",
     z.object({
       jobPath: z.string().describe("Full job path (e.g., 'my-folder/my-job' or 'pipeline/main')"),
-      parameters: z.record(z.string(), z.union([z.string(), z.array(z.string())])).optional()
+      parameters: z.record(z.string(), z.union([z.string(), z.array(z.string()).nonempty()])).optional()
         .describe("Build parameters. String values are submitted as-is (no comma splitting). Use string[] for multi-value parameters (ExtendedChoiceParameter, multi-select)."),
       splitOnComma: z.boolean().optional().default(false)
         .describe("[DEPRECATED] Legacy behaviour: split comma-bearing string values into multi-value submissions. Will be removed in v2.0. Prefer string[] values instead."),
@@ -29,6 +29,7 @@ export function registerBuildTools(
 
         if (parameters && Object.keys(parameters).length > 0) {
           const { formData, jsonParameters } = buildTriggerPayload(parameters, splitOnComma);
+          // jsonParameters is reserved for the v1.3 FILE/CREDENTIALS payload; not sent today.
           void jsonParameters;
           result = await client.postForm(jobPath, "/buildWithParameters", formData);
         } else {
