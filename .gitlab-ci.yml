@@ -29,6 +29,11 @@ build:
       - dist/
     expire_in: 1 hour
 
+test:
+  stage: check
+  script:
+    - npm test
+
 release:
   stage: release
   before_script:
