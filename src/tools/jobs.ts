@@ -3,6 +3,7 @@ import type { JenkinsClient } from "../jenkins-client.js";
 import type { JenkinsJob, ToolResult } from "../types.js";
 import { formatJobList, formatJobDetail, ok, error, truncateText } from "../utils/formatters.js";
 import { mapJenkinsParameter, type JenkinsParameterDefinition } from "../utils/parameter-mapper.js";
+import { parseJobConfig } from "../utils/job-xml.js";
 import type { ParameterSpec } from "../schemas/parameter.js";
 
 export function registerJobTools(
@@ -95,6 +96,25 @@ export function registerJobTools(
         const defs = (job.property ?? []).flatMap((p) => p.parameterDefinitions ?? []);
         const parameters: ParameterSpec[] = defs.map(mapJenkinsParameter);
         return ok(JSON.stringify({ parameters }, null, 2));
+      } catch (e) {
+        return handleError(e);
+      }
+    },
+  );
+
+  // 3c. describeJob
+  register(
+    "describeJob",
+    "Get a structured view of a job's config (SCM url/branch, Jenkinsfile path, parameters, retention, cron) without parsing raw XML. Reports unrecognised XML elements via 'unknownXmlElements'. Read-only and safe.",
+    z.object({
+      jobPath: z.string().describe("Full job path"),
+    }),
+    async (args) => {
+      const jobPath = args.jobPath as string;
+      try {
+        const xml = await client.getRaw(jobPath, "/config.xml");
+        const desc = parseJobConfig(xml);
+        return ok(JSON.stringify(desc, null, 2));
       } catch (e) {
         return handleError(e);
       }
