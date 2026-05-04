@@ -1,6 +1,6 @@
 {
   "name": "@alexsarrell/jenkins-mcp-server",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Jenkins MCP server for Claude Code integration",
   "main": "dist/index.js",
   "bin": {
