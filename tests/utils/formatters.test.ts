@@ -30,7 +30,7 @@ describe("formatBuild parameters", () => {
         },
       ],
     });
-    expect(text).toContain("Parameters:");
+    expect(text).toContain("Parameters (2):");
     expect(text).toContain("BRANCH = main");
     expect(text).toContain("DRY_RUN = true");
   });
@@ -53,6 +53,6 @@ describe("formatBuild parameters", () => {
 
   it("omits the parameters block when no parameters present", () => {
     const text = formatBuild({ ...buildBase, actions: [{ _class: "x", causes: [{ shortDescription: "Started by user" }] }] });
-    expect(text).not.toContain("Parameters:");
+    expect(text).not.toContain("Parameters (");
   });
 });
