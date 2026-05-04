@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { JenkinsClient } from "../jenkins-client.js";
 import type { JenkinsBuild, BuildArtifact, TestResult, ToolResult } from "../types.js";
 import { formatBuild, ok, error, truncateText } from "../utils/formatters.js";
+import { buildTriggerPayload, type ParameterValue } from "../utils/build-payload.js";
 
 export function registerBuildTools(
   client: JenkinsClient,
@@ -13,32 +14,22 @@ export function registerBuildTools(
     "Trigger a new build for a Jenkins job. Supports parameterized builds. For multibranch pipelines, trigger on a specific branch. Returns the queue item URL for tracking.",
     z.object({
       jobPath: z.string().describe("Full job path (e.g., 'my-folder/my-job' or 'pipeline/main')"),
-      parameters: z.record(z.string(), z.string()).optional().describe("Build parameters as key-value pairs (e.g., {\"BRANCH\": \"main\", \"DEPLOY\": \"true\"})"),
+      parameters: z.record(z.string(), z.union([z.string(), z.array(z.string())])).optional()
+        .describe("Build parameters. String values are submitted as-is (no comma splitting). Use string[] for multi-value parameters (ExtendedChoiceParameter, multi-select)."),
+      splitOnComma: z.boolean().optional().default(false)
+        .describe("[DEPRECATED] Legacy behaviour: split comma-bearing string values into multi-value submissions. Will be removed in v2.0. Prefer string[] values instead."),
     }),
     async (args) => {
       const jobPath = args.jobPath as string;
-      const parameters = args.parameters as Record<string, string> | undefined;
+      const parameters = args.parameters as Record<string, ParameterValue> | undefined;
 
       try {
         let result: { response: Response; data: unknown };
+        const splitOnComma = (args.splitOnComma as boolean) ?? false;
+
         if (parameters && Object.keys(parameters).length > 0) {
-          const formData = new URLSearchParams();
-          // Build JSON body — multi-value params (comma-separated) become arrays
-          const jsonParams: { name: string; value: string | string[] }[] = [];
-          for (const [name, value] of Object.entries(parameters)) {
-            if (value.includes(",")) {
-              const values = value.split(",").map(v => v.trim());
-              jsonParams.push({ name, value: values as unknown as string });
-              // ExtendedChoiceParameter (PT_CHECKBOX) requires repeated query params
-              for (const v of values) {
-                formData.append(name, v);
-              }
-            } else {
-              jsonParams.push({ name, value });
-              formData.append(name, value);
-            }
-          }
-          const json = JSON.stringify({ parameter: jsonParams });
+          const { formData, jsonParameters } = buildTriggerPayload(parameters, splitOnComma);
+          void jsonParameters;
           result = await client.postForm(jobPath, "/buildWithParameters", formData);
         } else {
           result = await client.post(jobPath, "/build");
