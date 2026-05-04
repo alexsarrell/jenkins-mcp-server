@@ -43,6 +43,7 @@ export interface JenkinsBuild {
   actions?: Array<{
     _class: string;
     causes?: Array<{ shortDescription: string; userName?: string }>;
+    parameters?: Array<{ _class?: string; name: string; value?: string | boolean | number }>;
   }>;
   artifacts?: BuildArtifact[];
   changeSets?: Array<{

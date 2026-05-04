@@ -54,19 +54,31 @@ export function registerBuildTools(
   // 6. getBuild
   register(
     "getBuild",
-    "Get detailed information about a specific build including status, duration, trigger cause, artifacts, and changes. Defaults to the last build if no number specified.",
+    "Get detailed information about a specific build including status, duration, trigger cause, parameters, artifacts, and changes. Defaults to the last build if no number specified. Use 'include' to control which optional sections are returned.",
     z.object({
       jobPath: z.string().describe("Full job path"),
       buildNumber: z.number().optional().describe("Build number (default: last build)"),
+      include: z.array(z.enum(["artifacts", "changes", "causes", "parameters"])).optional()
+        .describe("Sections to include. Default: [\"causes\", \"parameters\", \"artifacts\", \"changes\"]"),
     }),
     async (args) => {
       const jobPath = args.jobPath as string;
       const buildNumber = args.buildNumber as number | undefined;
+      const include = (args.include as string[] | undefined) ?? ["causes", "parameters", "artifacts", "changes"];
       const num = buildNumber ?? "lastBuild";
 
       try {
-        const tree = "number,url,result,building,duration,estimatedDuration,timestamp,displayName,description,fullDisplayName,actions[causes[shortDescription,userName]],artifacts[displayPath,fileName,relativePath],changeSets[items[msg,author[fullName],commitId]]";
-        const data = await client.get(jobPath, `/${num}/api/json`, { tree });
+        const treeFields = [
+          "number,url,result,building,duration,estimatedDuration,timestamp,displayName,description,fullDisplayName",
+        ];
+        const actionFields: string[] = [];
+        if (include.includes("causes")) actionFields.push("causes[shortDescription,userName]");
+        if (include.includes("parameters")) actionFields.push("parameters[name,value,_class]");
+        if (actionFields.length > 0) treeFields.push(`actions[${actionFields.join(",")}]`);
+        if (include.includes("artifacts")) treeFields.push("artifacts[displayPath,fileName,relativePath]");
+        if (include.includes("changes")) treeFields.push("changeSets[items[msg,author[fullName],commitId]]");
+
+        const data = await client.get(jobPath, `/${num}/api/json`, { tree: treeFields.join(",") });
         return ok(formatBuild(data as JenkinsBuild));
       } catch (e) {
         return handleError(e);

@@ -133,6 +133,17 @@ export function formatBuild(build: JenkinsBuild): string {
     }
   }
 
+  // Parameters
+  const parametersAction = build.actions?.find((a) => a.parameters && a.parameters.length > 0);
+  if (parametersAction?.parameters) {
+    lines.push(`\nParameters:`);
+    for (const p of parametersAction.parameters) {
+      const isPassword = (p._class || "").toLowerCase().includes("password");
+      const display = isPassword ? "[hidden]" : String(p.value ?? "");
+      lines.push(`  ${p.name} = ${display}`);
+    }
+  }
+
   // Changes
   if (build.changeSets) {
     const allChanges = build.changeSets.flatMap((cs) => cs.items);
