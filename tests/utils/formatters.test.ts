@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { formatBuild } from "../../src/utils/formatters.js";
+import { formatBuild, formatQueueItem } from "../../src/utils/formatters.js";
 import type { JenkinsBuild } from "../../src/types.js";
 
 const buildBase: JenkinsBuild = {
@@ -54,5 +54,52 @@ describe("formatBuild parameters", () => {
   it("omits the parameters block when no parameters present", () => {
     const text = formatBuild({ ...buildBase, actions: [{ _class: "x", causes: [{ shortDescription: "Started by user" }] }] });
     expect(text).not.toContain("Parameters (");
+  });
+});
+
+describe("formatQueueItem", () => {
+  it("renders WAITING with reason", () => {
+    const out = formatQueueItem({
+      id: 7,
+      task: { name: "deploy", url: "https://j/job/deploy/" },
+      why: "Waiting for next available executor",
+      _class: "hudson.model.Queue$WaitingItem",
+    });
+    expect(out).toContain("Queue item #7: WAITING");
+    expect(out).toContain("Why: Waiting for next available executor");
+  });
+
+  it("renders LEFT_QUEUE with executable build info", () => {
+    const out = formatQueueItem({
+      id: 7,
+      task: { name: "deploy", url: "https://j/job/deploy/" },
+      why: null,
+      _class: "hudson.model.Queue$LeftItem",
+      executable: { number: 42, url: "https://j/job/deploy/42/" },
+    });
+    expect(out).toContain("Queue item #7: LEFT_QUEUE");
+    expect(out).toContain("Build started: deploy #42");
+    expect(out).toContain("https://j/job/deploy/42/");
+  });
+
+  it("renders CANCELLED", () => {
+    const out = formatQueueItem({
+      id: 7,
+      task: { name: "deploy", url: "https://j/job/deploy/" },
+      why: null,
+      cancelled: true,
+      _class: "hudson.model.Queue$CancelledItem",
+    });
+    expect(out).toContain("Queue item #7: CANCELLED");
+  });
+
+  it("falls back to UNKNOWN for unrecognised _class", () => {
+    const out = formatQueueItem({
+      id: 7,
+      task: { name: "deploy", url: "https://j/job/deploy/" },
+      why: null,
+      _class: "hudson.model.Queue$WeirdItem",
+    });
+    expect(out).toContain("Queue item #7: UNKNOWN");
   });
 });

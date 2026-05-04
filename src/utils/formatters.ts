@@ -1,4 +1,4 @@
-import type { JenkinsJob, JenkinsBuild, PipelineStage, QueueItem, ToolResult } from "../types.js";
+import type { JenkinsJob, JenkinsBuild, PipelineStage, QueueItem, QueueItemDetail, QueueItemState, ToolResult } from "../types.js";
 
 const MAX_RESPONSE_BYTES = 100_000;
 
@@ -189,4 +189,28 @@ export function error(message: string, suggestion?: string): ToolResult {
   let text = `Error: ${message}`;
   if (suggestion) text += `\nSuggestion: ${suggestion}`;
   return { content: [{ type: "text", text }], isError: true };
+}
+
+function classifyQueueItem(item: QueueItemDetail): QueueItemState {
+  if (item.cancelled) return "CANCELLED";
+  const cls = item._class || "";
+  if (cls.endsWith("$WaitingItem")) return "WAITING";
+  if (cls.endsWith("$BlockedItem")) return "BLOCKED";
+  if (cls.endsWith("$BuildableItem")) return "BUILDABLE";
+  if (cls.endsWith("$LeftItem")) return "LEFT_QUEUE";
+  if (cls.endsWith("$CancelledItem")) return "CANCELLED";
+  return "UNKNOWN";
+}
+
+export function formatQueueItem(item: QueueItemDetail): string {
+  const state = classifyQueueItem(item);
+  const lines = [`Queue item #${item.id}: ${state}`];
+  lines.push(`Task: ${item.task.name}`);
+  if (state === "LEFT_QUEUE" && item.executable) {
+    lines.push(`Build started: ${item.task.name} #${item.executable.number}`);
+    lines.push(`URL: ${item.executable.url}`);
+  } else if (item.why) {
+    lines.push(`Why: ${item.why}`);
+  }
+  return lines.join("\n");
 }

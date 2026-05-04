@@ -107,6 +107,18 @@ export interface QueueItem {
   blocked: boolean;
 }
 
+export interface QueueItemDetail {
+  id: number;
+  task: { name: string; url: string };
+  why: string | null;
+  cancelled?: boolean;
+  executable?: { number: number; url: string };
+  // _class distinguishes WaitingItem | BlockedItem | BuildableItem | LeftItem | CancelledItem
+  _class?: string;
+}
+
+export type QueueItemState = "WAITING" | "BLOCKED" | "BUILDABLE" | "LEFT_QUEUE" | "CANCELLED" | "UNKNOWN";
+
 export interface JenkinsError {
   statusCode: number;
   message: string;

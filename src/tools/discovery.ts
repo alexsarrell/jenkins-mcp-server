@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { JenkinsClient } from "../jenkins-client.js";
-import type { QueueItem, ToolResult } from "../types.js";
-import { formatQueue, ok, error } from "../utils/formatters.js";
+import type { QueueItem, QueueItemDetail, ToolResult } from "../types.js";
+import { formatQueue, formatQueueItem, ok, error } from "../utils/formatters.js";
 
 export function registerDiscoveryTools(
   client: JenkinsClient,
@@ -84,7 +84,25 @@ export function registerDiscoveryTools(
     },
   );
 
-  // 18. enableDisableJob
+  // 18. getQueueItem
+  register(
+    "getQueueItem",
+    "Get the state of a specific queue item by ID. Use the queue ID returned from triggerBuild ('Queue item: #N') to find which build was started — this bridges queue → build.",
+    z.object({
+      queueId: z.number().int().describe("Queue item ID"),
+    }),
+    async (args) => {
+      const queueId = args.queueId as number;
+      try {
+        const data = await client.getAbsolute(`/queue/item/${queueId}/api/json`);
+        return ok(formatQueueItem(data as QueueItemDetail));
+      } catch (e) {
+        return handleError(e);
+      }
+    },
+  );
+
+  // 19. enableDisableJob
   register(
     "enableDisableJob",
     "Enable or disable a Jenkins job. Disabled jobs cannot be triggered.",
