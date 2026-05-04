@@ -1,7 +1,39 @@
-import { XMLParser } from "fast-xml-parser";
+import { XMLParser, XMLBuilder } from "fast-xml-parser";
 import { createHash } from "node:crypto";
 import { mapJenkinsParameter, type JenkinsParameterDefinition } from "./parameter-mapper.js";
 import type { ParameterSpec } from "../schemas/parameter.js";
+
+export interface PipelineSpec {
+  type: "pipeline";
+  description?: string;
+  disabled?: boolean;
+  scm: {
+    type: "git";
+    url: string;
+    branches?: string[];
+    credentialsId?: string;
+    jenkinsfilePath?: string;
+  };
+  triggers?: { cron?: string };
+  parameters?: ParameterSpec[];
+  buildRetention?: { numToKeep?: number; daysToKeep?: number };
+}
+export interface MultibranchSpec {
+  type: "multibranch";
+  description?: string;
+  source: {
+    type: "git";
+    url: string;
+    credentialsId?: string;
+  };
+  jenkinsfilePath?: string;
+  orphanedItemStrategy?: { numToKeep?: number; daysToKeep?: number };
+}
+export interface FolderSpec {
+  type: "folder";
+  description?: string;
+}
+export type JobSpec = PipelineSpec | MultibranchSpec | FolderSpec;
 
 const parser = new XMLParser({
   ignoreAttributes: false,
@@ -247,4 +279,184 @@ export function parseJobConfig(xml: string): JobDescription {
   if (parameters && parameters.length > 0) out.parameters = parameters;
   if (buildRetention) out.buildRetention = buildRetention;
   return out;
+}
+
+// ─── buildJobXml ─────────────────────────────────────────────────────────────
+
+const builder = new XMLBuilder({
+  ignoreAttributes: false,
+  attributeNamePrefix: "@_",
+  format: true,
+  indentBy: "  ",
+  suppressEmptyNode: false,
+});
+
+function paramDefXml(p: ParameterSpec): { tag: string; body: Record<string, unknown> } {
+  if (p.type === "string") {
+    return {
+      tag: "hudson.model.StringParameterDefinition",
+      body: { name: p.name, description: p.description ?? "", defaultValue: p.default ?? "", trim: p.trim ?? false },
+    };
+  }
+  if (p.type === "text") {
+    return {
+      tag: "hudson.model.TextParameterDefinition",
+      body: { name: p.name, description: p.description ?? "", defaultValue: p.default ?? "" },
+    };
+  }
+  if (p.type === "boolean") {
+    return {
+      tag: "hudson.model.BooleanParameterDefinition",
+      body: { name: p.name, description: p.description ?? "", defaultValue: String(p.default ?? false) },
+    };
+  }
+  if (p.type === "choice") {
+    return {
+      tag: "hudson.model.ChoiceParameterDefinition",
+      body: {
+        name: p.name,
+        description: p.description ?? "",
+        choices: { "@_class": "java.util.Arrays$ArrayList", a: { "@_class": "string-array", string: p.choices } },
+      },
+    };
+  }
+  if (p.type === "password") {
+    return {
+      tag: "hudson.model.PasswordParameterDefinition",
+      body: { name: p.name, description: p.description ?? "", defaultValue: "" },
+    };
+  }
+  if (p.type === "file") {
+    return { tag: "hudson.model.FileParameterDefinition", body: { name: p.name, description: p.description ?? "" } };
+  }
+  if (p.type === "run") {
+    return {
+      tag: "hudson.model.RunParameterDefinition",
+      body: { name: p.name, description: p.description ?? "", projectName: p.projectName ?? "" },
+    };
+  }
+  if (p.type === "credentials") {
+    return {
+      tag: "com.cloudbees.plugins.credentials.CredentialsParameterDefinition",
+      body: { name: p.name, description: p.description ?? "", credentialType: p.credentialType ?? "" },
+    };
+  }
+  // unknown — emit as a string parameter with a marker description
+  return {
+    tag: "hudson.model.StringParameterDefinition",
+    body: { name: p.name, description: `[UNKNOWN ORIGINAL TYPE: ${(p as { rawType: string }).rawType}] ${p.description ?? ""}`, defaultValue: "" },
+  };
+}
+
+function buildPipelineRoot(spec: PipelineSpec): Record<string, unknown> {
+  const properties: Record<string, unknown> = {};
+  if (spec.parameters && spec.parameters.length > 0) {
+    const grouped: Record<string, Array<Record<string, unknown>>> = {};
+    for (const p of spec.parameters) {
+      const { tag, body } = paramDefXml(p);
+      (grouped[tag] ??= []).push(body);
+    }
+    properties["hudson.model.ParametersDefinitionProperty"] = { parameterDefinitions: grouped };
+  }
+  if (spec.buildRetention) {
+    properties["jenkins.model.BuildDiscarderProperty"] = {
+      strategy: {
+        "@_class": "hudson.tasks.LogRotator",
+        daysToKeep: String(spec.buildRetention.daysToKeep ?? -1),
+        numToKeep: String(spec.buildRetention.numToKeep ?? -1),
+        artifactDaysToKeep: "-1",
+        artifactNumToKeep: "-1",
+      },
+    };
+  }
+  const triggers: Record<string, unknown> = {};
+  if (spec.triggers?.cron) {
+    triggers["hudson.triggers.TimerTrigger"] = { spec: spec.triggers.cron };
+  }
+  const definition = {
+    "@_class": "org.jenkinsci.plugins.workflow.cps.CpsScmFlowDefinition",
+    "@_plugin": "workflow-cps",
+    scm: {
+      "@_class": "hudson.plugins.git.GitSCM",
+      "@_plugin": "git",
+      userRemoteConfigs: {
+        "hudson.plugins.git.UserRemoteConfig": {
+          url: spec.scm.url,
+          ...(spec.scm.credentialsId ? { credentialsId: spec.scm.credentialsId } : {}),
+        },
+      },
+      branches: {
+        "hudson.plugins.git.BranchSpec": (spec.scm.branches ?? ["*/main"]).map((name) => ({ name })),
+      },
+    },
+    scriptPath: spec.scm.jenkinsfilePath ?? "Jenkinsfile",
+    lightweight: "true",
+  };
+  return {
+    "flow-definition": {
+      "@_plugin": "workflow-job",
+      description: spec.description ?? "",
+      keepDependencies: "false",
+      ...(Object.keys(properties).length > 0 ? { properties } : { properties: "" }),
+      ...(Object.keys(triggers).length > 0 ? { triggers } : {}),
+      definition,
+      disabled: String(spec.disabled ?? false),
+    },
+  };
+}
+
+function buildMultibranchRoot(spec: MultibranchSpec): Record<string, unknown> {
+  return {
+    "org.jenkinsci.plugins.workflow.multibranch.WorkflowMultiBranchProject": {
+      "@_plugin": "workflow-multibranch",
+      description: spec.description ?? "",
+      disabled: "false",
+      sources: {
+        "@_class": "jenkins.branch.MultiBranchProject$BranchSourceList",
+        data: {
+          "jenkins.branch.BranchSource": {
+            source: {
+              "@_class": "jenkins.plugins.git.GitSCMSource",
+              "@_plugin": "git",
+              id: "1",
+              remote: spec.source.url,
+              ...(spec.source.credentialsId ? { credentialsId: spec.source.credentialsId } : {}),
+            },
+          },
+        },
+      },
+      factory: {
+        "@_class": "org.jenkinsci.plugins.workflow.multibranch.WorkflowBranchProjectFactory",
+        scriptPath: spec.jenkinsfilePath ?? "Jenkinsfile",
+      },
+      ...(spec.orphanedItemStrategy
+        ? {
+            orphanedItemStrategy: {
+              "@_class": "com.cloudbees.hudson.plugins.folder.computed.DefaultOrphanedItemStrategy",
+              pruneDeadBranches: "true",
+              daysToKeep: String(spec.orphanedItemStrategy.daysToKeep ?? -1),
+              numToKeep: String(spec.orphanedItemStrategy.numToKeep ?? -1),
+            },
+          }
+        : {}),
+    },
+  };
+}
+
+function buildFolderRoot(spec: FolderSpec): Record<string, unknown> {
+  return {
+    "com.cloudbees.hudson.plugins.folder.Folder": {
+      "@_plugin": "cloudbees-folder",
+      description: spec.description ?? "",
+    },
+  };
+}
+
+export function buildJobXml(spec: JobSpec): string {
+  let body: Record<string, unknown>;
+  if (spec.type === "pipeline") body = buildPipelineRoot(spec);
+  else if (spec.type === "multibranch") body = buildMultibranchRoot(spec);
+  else body = buildFolderRoot(spec);
+  const xml = builder.build(body) as string;
+  return `<?xml version='1.1' encoding='UTF-8'?>\n${xml}`;
 }
