@@ -2,43 +2,38 @@ import { z } from "zod";
 import type { JenkinsClient } from "../jenkins-client.js";
 import type { JenkinsBuild, BuildArtifact, TestResult, ToolResult } from "../types.js";
 import { formatBuild, ok, error, truncateText } from "../utils/formatters.js";
+import { buildTriggerPayload, type ParameterValue } from "../utils/build-payload.js";
+import { grepLog } from "../utils/log-grep.js";
 
 export function registerBuildTools(
   client: JenkinsClient,
   register: (name: string, description: string, schema: z.ZodType, handler: (args: Record<string, unknown>) => Promise<ToolResult>) => void,
 ) {
+  const DEFAULT_GET_BUILD_INCLUDE = ["causes", "parameters", "artifacts", "changes"] as const;
+
   // 5. triggerBuild
   register(
     "triggerBuild",
     "Trigger a new build for a Jenkins job. Supports parameterized builds. For multibranch pipelines, trigger on a specific branch. Returns the queue item URL for tracking.",
     z.object({
       jobPath: z.string().describe("Full job path (e.g., 'my-folder/my-job' or 'pipeline/main')"),
-      parameters: z.record(z.string(), z.string()).optional().describe("Build parameters as key-value pairs (e.g., {\"BRANCH\": \"main\", \"DEPLOY\": \"true\"})"),
+      parameters: z.record(z.string(), z.union([z.string(), z.array(z.string()).nonempty()])).optional()
+        .describe("Build parameters. String values are submitted as-is (no comma splitting). Use string[] for multi-value parameters (ExtendedChoiceParameter, multi-select)."),
+      splitOnComma: z.boolean().optional().default(false)
+        .describe("[DEPRECATED] Legacy behaviour: split comma-bearing string values into multi-value submissions. Will be removed in v2.0. Prefer string[] values instead."),
     }),
     async (args) => {
       const jobPath = args.jobPath as string;
-      const parameters = args.parameters as Record<string, string> | undefined;
+      const parameters = args.parameters as Record<string, ParameterValue> | undefined;
 
       try {
         let result: { response: Response; data: unknown };
+        const splitOnComma = (args.splitOnComma as boolean) ?? false;
+
         if (parameters && Object.keys(parameters).length > 0) {
-          const formData = new URLSearchParams();
-          // Build JSON body — multi-value params (comma-separated) become arrays
-          const jsonParams: { name: string; value: string | string[] }[] = [];
-          for (const [name, value] of Object.entries(parameters)) {
-            if (value.includes(",")) {
-              const values = value.split(",").map(v => v.trim());
-              jsonParams.push({ name, value: values as unknown as string });
-              // ExtendedChoiceParameter (PT_CHECKBOX) requires repeated query params
-              for (const v of values) {
-                formData.append(name, v);
-              }
-            } else {
-              jsonParams.push({ name, value });
-              formData.append(name, value);
-            }
-          }
-          const json = JSON.stringify({ parameter: jsonParams });
+          const { formData, jsonParameters } = buildTriggerPayload(parameters, splitOnComma);
+          // jsonParameters is reserved for the v1.3 FILE/CREDENTIALS payload; not sent today.
+          void jsonParameters;
           result = await client.postForm(jobPath, "/buildWithParameters", formData);
         } else {
           result = await client.post(jobPath, "/build");
@@ -62,19 +57,31 @@ export function registerBuildTools(
   // 6. getBuild
   register(
     "getBuild",
-    "Get detailed information about a specific build including status, duration, trigger cause, artifacts, and changes. Defaults to the last build if no number specified.",
+    "Get detailed information about a specific build including status, duration, trigger cause, parameters, artifacts, and changes. Defaults to the last build if no number specified. Use 'include' to control which optional sections are returned.",
     z.object({
       jobPath: z.string().describe("Full job path"),
       buildNumber: z.number().optional().describe("Build number (default: last build)"),
+      include: z.array(z.enum(["artifacts", "changes", "causes", "parameters"])).optional()
+        .describe(`Sections to include. Default: ${JSON.stringify(DEFAULT_GET_BUILD_INCLUDE)}`),
     }),
     async (args) => {
       const jobPath = args.jobPath as string;
       const buildNumber = args.buildNumber as number | undefined;
+      const include = (args.include as string[] | undefined) ?? [...DEFAULT_GET_BUILD_INCLUDE];
       const num = buildNumber ?? "lastBuild";
 
       try {
-        const tree = "number,url,result,building,duration,estimatedDuration,timestamp,displayName,description,fullDisplayName,actions[causes[shortDescription,userName]],artifacts[displayPath,fileName,relativePath],changeSets[items[msg,author[fullName],commitId]]";
-        const data = await client.get(jobPath, `/${num}/api/json`, { tree });
+        const treeFields = [
+          "number,url,result,building,duration,estimatedDuration,timestamp,displayName,description,fullDisplayName",
+        ];
+        const actionFields: string[] = [];
+        if (include.includes("causes")) actionFields.push("causes[shortDescription,userName]");
+        if (include.includes("parameters")) actionFields.push("parameters[name,value,_class]");
+        if (actionFields.length > 0) treeFields.push(`actions[${actionFields.join(",")}]`);
+        if (include.includes("artifacts")) treeFields.push("artifacts[displayPath,fileName,relativePath]");
+        if (include.includes("changes")) treeFields.push("changeSets[items[msg,author[fullName],commitId]]");
+
+        const data = await client.get(jobPath, `/${num}/api/json`, { tree: treeFields.join(",") });
         return ok(formatBuild(data as JenkinsBuild));
       } catch (e) {
         return handleError(e);
@@ -85,56 +92,80 @@ export function registerBuildTools(
   // 7. getBuildLog
   register(
     "getBuildLog",
-    "Get console output of a Jenkins build. By default returns the last 200 lines (tail). Use 'maxLines' to control output size. For large logs, use 'startByte' for byte-offset pagination. Returns hasMore flag and nextStart for follow-up calls.",
+    "Get console output of a Jenkins build. Three modes: (a) tail (default — returns last `maxLines`), (b) byte-offset pagination via `startByte`, (c) grep mode if `pattern` is set (returns matches with `before`/`after` context lines). Modes are mutually exclusive — if `pattern` is set, tail/startByte are ignored.",
     z.object({
       jobPath: z.string().describe("Full job path"),
       buildNumber: z.number().optional().describe("Build number (default: last build)"),
-      maxLines: z.number().optional().default(200).describe("Maximum lines to return (default: 200)"),
-      startByte: z.number().optional().describe("Byte offset to start from (for pagination). Use nextStart from previous response."),
+      maxLines: z.number().optional().default(200).describe("[Tail mode] Maximum lines to return"),
+      startByte: z.number().optional().describe("[Pagination mode] Byte offset to start from"),
+      pattern: z.string().optional().describe("[Grep mode] Search pattern. Switches the tool to grep mode when set."),
+      regex: z.boolean().optional().default(false).describe("[Grep mode] Treat pattern as regex (default: case-insensitive substring)"),
+      before: z.number().optional().default(0).describe("[Grep mode] Lines of context before each match"),
+      after: z.number().optional().default(0).describe("[Grep mode] Lines of context after each match"),
+      maxMatches: z.number().optional().default(50).describe("[Grep mode] Stop after this many matches"),
     }),
     async (args) => {
       const jobPath = args.jobPath as string;
       const buildNumber = args.buildNumber as number | undefined;
       const maxLines = (args.maxLines as number) || 200;
       const startByte = args.startByte as number | undefined;
+      const pattern = args.pattern as string | undefined;
+      const regex = (args.regex as boolean) ?? false;
+      const before = (args.before as number) ?? 0;
+      const after = (args.after as number) ?? 0;
+      const maxMatches = (args.maxMatches as number) ?? 50;
       const num = buildNumber ?? "lastBuild";
 
       try {
+        // Grep mode
+        if (pattern !== undefined) {
+          const text = await client.getRaw(jobPath, `/${num}/consoleText`);
+          let result;
+          try {
+            result = grepLog(text, { pattern, regex, before, after, maxMatches });
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            return error(msg);
+          }
+          const header = [
+            `--- Build Log Search: pattern="${pattern}" (regex=${regex}, before=${before}, after=${after}) ---`,
+            `Total matches: ${result.matches.length}${result.truncated ? ` (truncated at maxMatches=${maxMatches})` : ""}`,
+            "",
+          ];
+          const blocks = result.matches.map((m, idx) => {
+            const ctxLines = m.context.map((c) => `${String(c.lineNumber).padStart(6)}: ${c.text}`);
+            return `=== match #${idx + 1} (line ${m.lineNumber}) ===\n${ctxLines.join("\n")}`;
+          });
+          return ok(truncateText(header.join("\n") + blocks.join("\n\n")));
+        }
+
+        // Pagination mode
         if (startByte !== undefined) {
-          // Progressive log with byte offset
           const url = `/${num}/logText/progressiveText`;
           const data = await client.get(jobPath, url, { start: String(startByte) });
           const text = typeof data === "string" ? data : String(data);
-          // Note: progressiveText returns X-Text-Size and X-More-Data headers
-          // but we can't easily access them through our client. Return what we have.
           return ok(truncateText(text));
         }
 
-        // Full console text, then tail
+        // Tail mode (default)
         const text = await client.getRaw(jobPath, `/${num}/consoleText`);
         const lines = text.split("\n");
         const totalLines = lines.length;
-
         let output: string;
         let hasMore = false;
-
         if (lines.length > maxLines) {
-          // Tail from end
-          const start = lines.length - maxLines;
-          output = lines.slice(start).join("\n");
+          output = lines.slice(lines.length - maxLines).join("\n");
           hasMore = true;
         } else {
           output = text;
         }
-
         const meta = [
           `--- Build Log (${totalLines} total lines, showing last ${Math.min(maxLines, totalLines)}) ---`,
         ];
         if (hasMore) {
-          meta.push(`[Has more content. ${totalLines - maxLines} earlier lines not shown. Increase maxLines or use startByte for full log.]`);
+          meta.push(`[Has more content. ${totalLines - maxLines} earlier lines not shown. Increase maxLines, use startByte, or use pattern for grep mode.]`);
         }
         meta.push("");
-
         return ok(truncateText(meta.join("\n") + output));
       } catch (e) {
         return handleError(e);

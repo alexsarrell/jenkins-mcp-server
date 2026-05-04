@@ -43,6 +43,7 @@ export interface JenkinsBuild {
   actions?: Array<{
     _class: string;
     causes?: Array<{ shortDescription: string; userName?: string }>;
+    parameters?: Array<{ _class?: string; name: string; value?: string | boolean | number }>;
   }>;
   artifacts?: BuildArtifact[];
   changeSets?: Array<{
@@ -105,6 +106,18 @@ export interface QueueItem {
   stuck: boolean;
   blocked: boolean;
 }
+
+export interface QueueItemDetail {
+  id: number;
+  task: { name: string; url: string };
+  why: string | null;
+  cancelled?: boolean;
+  executable?: { number: number; url: string };
+  // _class distinguishes WaitingItem | BlockedItem | BuildableItem | LeftItem | CancelledItem
+  _class?: string;
+}
+
+export type QueueItemState = "WAITING" | "BLOCKED" | "BUILDABLE" | "LEFT_QUEUE" | "CANCELLED" | "UNKNOWN";
 
 export interface JenkinsError {
   statusCode: number;

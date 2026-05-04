@@ -127,6 +127,35 @@ export class JenkinsClient {
     return resp.text();
   }
 
+  /**
+   * Stream a Jenkins console log chunk-by-chunk via /logText/progressiveText.
+   * Yields chunks until the log ends. Caller can stop iteration early.
+   * Falls back gracefully — if the endpoint returns 404, the caller should retry with /consoleText.
+   */
+  async *getProgressiveText(
+    jobPath: string,
+    buildNumber: number | "lastBuild",
+  ): AsyncGenerator<string, void, void> {
+    let start = 0;
+    const url = buildJenkinsUrl(this.config.url, jobPath, `/${buildNumber}/logText/progressiveText`);
+    while (true) {
+      const u = new URL(url);
+      u.searchParams.set("start", String(start));
+      const resp = await fetch(u.toString(), { headers: this.getHeaders() });
+      if (!resp.ok) {
+        await this.throwJenkinsError(resp);
+      }
+      const text = await resp.text();
+      if (text.length > 0) yield text;
+      const moreData = resp.headers.get("X-More-Data");
+      const sizeHeader = resp.headers.get("X-Text-Size");
+      if (moreData !== "true") return;
+      const newStart = sizeHeader ? Number(sizeHeader) : start + text.length;
+      if (newStart <= start) return; // protect against infinite loop
+      start = newStart;
+    }
+  }
+
   async getAbsolute(
     path: string,
     params?: Record<string, string>,

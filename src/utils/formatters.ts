@@ -1,4 +1,4 @@
-import type { JenkinsJob, JenkinsBuild, PipelineStage, QueueItem, ToolResult } from "../types.js";
+import type { JenkinsJob, JenkinsBuild, PipelineStage, QueueItem, QueueItemDetail, QueueItemState, ToolResult } from "../types.js";
 
 const MAX_RESPONSE_BYTES = 100_000;
 
@@ -125,6 +125,18 @@ export function formatBuild(build: JenkinsBuild): string {
     lines.push(`Triggered by: ${causes.join(", ")}`);
   }
 
+  // Parameters
+  const parametersAction = build.actions?.find((a) => a.parameters && a.parameters.length > 0);
+  if (parametersAction?.parameters) {
+    lines.push(`\nParameters (${parametersAction.parameters.length}):`);
+    for (const p of parametersAction.parameters) {
+      // Loose substring match — covers PasswordParameterValue and most plugin variants.
+      const isPassword = (p._class || "").toLowerCase().includes("password");
+      const display = isPassword ? "[hidden]" : String(p.value ?? "");
+      lines.push(`  ${p.name} = ${display}`);
+    }
+  }
+
   // Artifacts
   if (build.artifacts && build.artifacts.length > 0) {
     lines.push(`\nArtifacts (${build.artifacts.length}):`);
@@ -177,4 +189,28 @@ export function error(message: string, suggestion?: string): ToolResult {
   let text = `Error: ${message}`;
   if (suggestion) text += `\nSuggestion: ${suggestion}`;
   return { content: [{ type: "text", text }], isError: true };
+}
+
+function classifyQueueItem(item: QueueItemDetail): QueueItemState {
+  if (item.cancelled) return "CANCELLED";
+  const cls = item._class || "";
+  if (cls.endsWith("$WaitingItem")) return "WAITING";
+  if (cls.endsWith("$BlockedItem")) return "BLOCKED";
+  if (cls.endsWith("$BuildableItem")) return "BUILDABLE";
+  if (cls.endsWith("$LeftItem")) return "LEFT_QUEUE";
+  if (cls.endsWith("$CancelledItem")) return "CANCELLED";
+  return "UNKNOWN";
+}
+
+export function formatQueueItem(item: QueueItemDetail): string {
+  const state = classifyQueueItem(item);
+  const lines = [`Queue item #${item.id}: ${state}`];
+  lines.push(`Task: ${item.task.name}`);
+  if (state === "LEFT_QUEUE" && item.executable) {
+    lines.push(`Build started: ${item.task.name} #${item.executable.number}`);
+    lines.push(`URL: ${item.executable.url}`);
+  } else if (item.why) {
+    lines.push(`Why: ${item.why}`);
+  }
+  return lines.join("\n");
 }

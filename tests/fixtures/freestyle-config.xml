@@ -1,0 +1,15 @@
+<?xml version='1.1' encoding='UTF-8'?>
+<project>
+  <description>Freestyle deploy job</description>
+  <disabled>false</disabled>
+  <concurrentBuild>true</concurrentBuild>
+  <properties/>
+  <scm class="hudson.scm.NullSCM"/>
+  <builders>
+    <hudson.tasks.Shell>
+      <command>echo deploying</command>
+    </hudson.tasks.Shell>
+  </builders>
+  <publishers/>
+  <buildWrappers/>
+</project>
